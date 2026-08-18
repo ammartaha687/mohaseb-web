@@ -1,0 +1,47 @@
+{
+  "name": "mohaseb-offline-cloud",
+  "version": "1.0.0",
+  "description": "محاسب - Windows Offline-First مع بنية جاهزة للمزامنة السحابية",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.mohaseb.offlinecloud",
+    "productName": "محاسب",
+    "files": [
+      "index.html",
+      "main.js",
+      "preload.js",
+      "sync/",
+      "supabase-client.js",
+      "cloud-config.js",
+      "web-sync.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "محاسب"
+    }
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.3"
+  }
+}
