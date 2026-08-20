@@ -1137,7 +1137,7 @@ html.phone-device #mohasebUniversalEnter:active {
     };
 
     /* =========================
-       المزامنة السحابية المركزية v8.1
+       المزامنة السحابية المركزية v10
        Supabase = مصدر الحقيقة الوحيد.
        لا Snapshots ولا browser_inventory_op.
        الكتابة Compare-and-Swap عبر RPC، وعند التعارض تتم إعادة
@@ -1145,11 +1145,21 @@ html.phone-device #mohasebUniversalEnter:active {
     ========================= */
     const browserCloudSync = (() => {
         const cfg = window.MOHASEB_CLOUD_CONFIG || {};
-        const META_KEY = 'mohaseb_central_sync_meta_v81';
-        const DEVICE_ID_KEY = 'mohaseb_central_device_id_v81';
+        const META_KEY = 'mohaseb_central_sync_meta_v10';
+        const DEVICE_ID_KEY = 'mohaseb_central_device_id_v10';
         const STORES = ['inventory','inventoryArchive','salesLog','returnsLog','salesArchive','monthlyReports','miswaqLog','expensesData'];
         let deviceId = null, online = false, pending = 0, syncing = false;
         const dirtyStores = new Set();
+        const storeLocks = new Map();
+        const withStoreLock = async (store, fn) => {
+            const previous = storeLocks.get(store) || Promise.resolve();
+            let release;
+            const current = new Promise(r => { release = r; });
+            const chain = previous.then(() => current);
+            storeLocks.set(store, chain);
+            await previous;
+            try { return await fn(); } finally { release(); if (storeLocks.get(store) === chain) storeLocks.delete(store); }
+        };
         const clone = v => JSON.parse(JSON.stringify(v ?? []));
         const equal = (a,b) => JSON.stringify(a) === JSON.stringify(b);
         const json = v => JSON.stringify(v);
@@ -1194,7 +1204,7 @@ html.phone-device #mohasebUniversalEnter:active {
         const commit = async (store,baseVersion,data,device) => {const rows=await rpc('mohaseb_sync_commit',{p_store_name:store,p_base_version:Number(baseVersion||0),p_data:data,p_device_id:device});return Array.isArray(rows)?rows[0]:rows;};
         const baseFor = store => {const m=readMeta();return m[store]||{version:0,data:[]};};
         const saveBase = (store,version,data) => {const m=readMeta();m[store]={version:Number(version||0),data:clone(data)};writeMeta(m);};
-        const syncStore = async store => {
+        const syncStoreUnlocked = async store => {
             let local=await getLocal(store), base=baseFor(store), remote=await getState(store), desired=clone(local), baseData=clone(base.data), baseVersion=Number(base.version||0);
             if(!dirtyStores.has(store)&&equal(local,baseData)){if(remote.version!==baseVersion){await dbSaveAllLocal(store,remote.data);saveBase(store,remote.version,remote.data);markPending(store,false);return true;}markPending(store,false);return false;}
             if(remote.version!==baseVersion){desired=mergeThreeWay(store,baseData,local,remote.data);baseData=clone(remote.data);baseVersion=remote.version;await dbSaveAllLocal(store,desired);}
@@ -1215,9 +1225,11 @@ html.phone-device #mohasebUniversalEnter:active {
             }
             throw new Error('تعذر حل تعارض المزامنة');
         };
+        const syncStore = async store => withStoreLock(store, () => syncStoreUnlocked(store));
+
         const sync = async () => {
             if(syncing)return status(); syncing=true;setIndicator('syncing');const changed=[];
-            try{if(!navigator.onLine){online=false;setIndicator('offline');return status();}await getCloudDeviceId();online=true;for(const s of STORES){const before=JSON.stringify(await getLocal(s));await syncStore(s);const after=JSON.stringify(await getLocal(s));if(before!==after)changed.push(s);}return {...status(),changedStores:changed};}
+            try{if(!navigator.onLine){online=false;setIndicator('offline');return status();}await getCloudDeviceId();online=true;for(const s of STORES){const before=JSON.stringify(await getLocal(s));await syncStore(s);const after=JSON.stringify(await getLocal(s));if(before!==after)changed.push(s);}if(changed.length && typeof window.__MOHASEB_REFRESH_FROM_CLOUD__==='function'){await window.__MOHASEB_REFRESH_FROM_CLOUD__(changed);}return {...status(),changedStores:changed};}
             catch(e){online=false;console.error('Central sync failed',e);setIndicator('offline',e.status===401?'صلاحية السحابة مرفوضة':'تعذر الاتصال بالسحابة');return {...status(),error:e.message};}
             finally{syncing=false;if(online)setIndicator('online');}
         };
@@ -3576,8 +3588,7 @@ html.phone-device #mohasebUniversalEnter:active {
             realtimeChannel = sb.channel(channelName);
             realtimeChannel.on('broadcast', { event: 'sync_hint' }, async ({ payload }) => {
                 if (payload?.deviceId && payload.deviceId === browserCloudSync.status().deviceId) return;
-                await browserCloudSync.sync();
-                await refreshAllDataFromIndexedDB();
+                try { await browserCloudSync.sync(); await refreshAllDataFromIndexedDB(); } catch (e) { console.warn('Realtime sync failed:', e); }
             }).subscribe((status, err) => {
                 console.log('Central realtime status:', status, err || '');
                 realtimeStarted = status === 'SUBSCRIBED';
@@ -3617,7 +3628,7 @@ html.phone-device #mohasebUniversalEnter:active {
     // نسخة من الأجهزة الأخرى. هذا مهم خصوصاً لنسخة Electron في لابتوب المحل.
     setInterval(() => {
         browserCloudSync.sync().catch(err => console.warn('Periodic cloud sync failed:', err));
-    }, 10000);
+    }, 2000);
 
 </script>
 
